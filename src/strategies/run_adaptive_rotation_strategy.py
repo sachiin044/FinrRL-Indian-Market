@@ -409,15 +409,21 @@ def run_backtest(config_path: str, start_date: str, end_date: str,
         print(f"Audit logs saved to: {audit_dir}")
 
         # 6. Performance analysis & equity curve
+        benchmark_symbols = []
+        benchmark_symbol = getattr(config.benchmark, 'excess_return_benchmark', None)
+        if benchmark_symbol:
+            benchmark_symbols.append(benchmark_symbol)
+
         _generate_performance_report(
             weights_detail_df, start_date, end_date,
-            data_dir or str(config.paths.data_root), weights_dir
+            data_dir or str(config.paths.data_root), weights_dir,
+            benchmark_symbols=benchmark_symbols
         )
 
     return results
 
 
-def _generate_performance_report(weights_df, start_date, end_date, data_dir, output_dir):
+def _generate_performance_report(weights_df, start_date, end_date, data_dir, output_dir, benchmark_symbols=None):
     """Generate performance metrics and equity curve chart after backtest."""
 
     print(f"\n{'='*60}")
@@ -460,8 +466,9 @@ def _generate_performance_report(weights_df, start_date, end_date, data_dir, out
 
     equity = pd.DataFrame({'date': pd.to_datetime(dates), 'portfolio': portfolio_values}).set_index('date')
 
-    # Benchmarks
-    for bench in ['SPY', 'QQQ']:
+    # Benchmarks (config-driven; fallback to US defaults for backward compatibility)
+    benchmark_symbols = benchmark_symbols or ['SPY', 'QQQ']
+    for bench in benchmark_symbols:
         csv_path = data_path / f"{bench}_daily.csv"
         if csv_path.exists():
             df = pd.read_csv(csv_path)
@@ -486,7 +493,7 @@ def _generate_performance_report(weights_df, start_date, end_date, data_dir, out
     # Print results table
     header = f"{'Metric':<25s} {'Strategy':>12s}"
     divider = "-" * 40
-    for bench in ['SPY', 'QQQ']:
+    for bench in benchmark_symbols:
         if bench in equity.columns:
             header += f" {bench:>10s}"
             divider += "-" * 11
@@ -528,7 +535,7 @@ def _generate_performance_report(weights_df, start_date, end_date, data_dir, out
     for label, val, bench_fn in rows:
         line = f"{label:<25s} {val:>12s}"
         if bench_fn:
-            for b in ['SPY', 'QQQ']:
+            for b in benchmark_symbols:
                 line += _bench_metric(b, bench_fn)
         print(line)
 
@@ -548,14 +555,18 @@ def _generate_performance_report(weights_df, start_date, end_date, data_dir, out
         ax1.plot(equity.index, equity['portfolio'],
                  label=f'Adaptive Rotation ({equity["portfolio"].iloc[-1]:.2f}x)',
                  color='#2563eb', linewidth=2)
-        if 'SPY' in equity.columns:
-            ax1.plot(equity.index, equity['SPY'],
-                     label=f'SPY ({equity["SPY"].iloc[-1]:.2f}x)',
-                     color='#6b7280', linewidth=1.2, alpha=0.8)
-        if 'QQQ' in equity.columns:
-            ax1.plot(equity.index, equity['QQQ'],
-                     label=f'QQQ ({equity["QQQ"].iloc[-1]:.2f}x)',
-                     color='#f59e0b', linewidth=1.2, alpha=0.8)
+        benchmark_palette = ['#6b7280', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444']
+        for i, bench in enumerate(benchmark_symbols):
+            if bench in equity.columns:
+                color = benchmark_palette[i % len(benchmark_palette)]
+                ax1.plot(
+                    equity.index,
+                    equity[bench],
+                    label=f'{bench} ({equity[bench].iloc[-1]:.2f}x)',
+                    color=color,
+                    linewidth=1.2,
+                    alpha=0.8
+                )
         ax1.set_ylabel('Growth of $1', fontsize=12)
         ax1.legend(fontsize=11, loc='upper left')
         ax1.grid(True, alpha=0.3)
